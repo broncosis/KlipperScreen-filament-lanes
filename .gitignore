@@ -1,0 +1,5 @@
+.claude/settings.local.json
+.claude/memory/
+__pycache__/
+*.pyc
+*.pyo
