@@ -1,6 +1,6 @@
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, GLib, GdkPixbuf
+from gi.repository import Gtk, GLib
 import logging
 
 from panels.base_panel import ScreenPanel
@@ -16,16 +16,16 @@ class Panel(ScreenPanel):
     """
     Spoolman spool browser opened from the Filament Lanes panel.
     Lets the user pick a spool to assign to a specific lane, or clear the
-    current assignment.  On confirm the lane_data namespace in Moonraker is
-    updated and the panel closes.
+    current assignment.  On selection, writes the spool_id to Klipper's
+    save_variables via SAVE_VARIABLE gcode so it persists across restarts.
     """
 
-    def __init__(self, screen, title, lane=0, lane_data=None, **kwargs):
+    def __init__(self, screen, title, lane=0, current_name="", **kwargs):
         title = title or _("Assign Spool")
         super().__init__(screen, title)
 
         self.lane = lane
-        self.lane_data = dict(lane_data) if lane_data else {}
+        self.current_name = current_name
         self.spools = []
 
         self._build_ui()
@@ -38,9 +38,8 @@ class Panel(ScreenPanel):
     def _build_ui(self):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
 
-        # Current assignment info + clear button
-        current = self.lane_data.get(str(self.lane), {})
-        cur_name = current.get("name") or _("None")
+        # Header: current assignment + clear button
+        cur_name = self.current_name or _("None")
         header = Gtk.Label()
         header.set_markup(
             f"<b>T{self.lane}</b>  —  {GLib.markup_escape_text(cur_name)}"
@@ -56,7 +55,7 @@ class Panel(ScreenPanel):
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         root.pack_start(sep, False, False, 4)
 
-        # Spool list inside a scrolled window
+        # Scrollable spool list
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
@@ -69,12 +68,8 @@ class Panel(ScreenPanel):
         # Loading spinner shown until fetch completes
         self._spinner_row = Gtk.ListBoxRow()
         self._spinner_row.set_activatable(False)
-        spinner_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8
-        )
+        spinner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         spinner_box.set_halign(Gtk.Align.CENTER)
-        spinner_box.set_valign(Gtk.Align.CENTER)
         spinner_box.set_margin_top(16)
         spinner = Gtk.Spinner()
         spinner.start()
@@ -91,7 +86,6 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
 
     def _fetch_spools(self):
-        # Moonraker proxies Spoolman at /server/spoolman/spools
         self._screen.apiclient.send_request(
             "server/spoolman/spools",
             params={},
@@ -104,7 +98,6 @@ class Panel(ScreenPanel):
             GLib.idle_add(self._show_error, _("Could not fetch spool list."))
             return
 
-        # Result shape: {"result": [...spools...]} or just [...spools...]
         if isinstance(result, dict) and "result" in result:
             spools = result["result"]
         elif isinstance(result, list):
@@ -123,7 +116,6 @@ class Panel(ScreenPanel):
         GLib.idle_add(self._populate_list)
 
     def _populate_list(self):
-        # Remove spinner
         self._listbox.remove(self._spinner_row)
 
         if not self.spools:
@@ -147,8 +139,7 @@ class Panel(ScreenPanel):
         filament = spool.get("filament") or {}
         name = filament.get("name") or _("Unknown")
         material = filament.get("material") or ""
-        vendor_obj = filament.get("vendor") or {}
-        vendor = vendor_obj.get("name") or ""
+        vendor = (filament.get("vendor") or {}).get("name", "")
         color_hex = filament.get("color_hex") or ""
         spool_id = spool.get("id")
 
@@ -156,8 +147,6 @@ class Panel(ScreenPanel):
             return None
 
         row = Gtk.ListBoxRow()
-        row.set_name(f"spool_row_{spool_id}")
-
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         box.set_margin_start(6)
         box.set_margin_end(6)
@@ -167,16 +156,13 @@ class Panel(ScreenPanel):
         # Color swatch
         swatch = Gtk.DrawingArea()
         swatch.set_size_request(28, 28)
-        if color_hex:
-            try:
-                r = int(color_hex[0:2], 16) / 255.0
-                g = int(color_hex[2:4], 16) / 255.0
-                b = int(color_hex[4:6], 16) / 255.0
-                swatch.connect("draw", self._draw_swatch, r, g, b)
-            except (ValueError, IndexError):
-                swatch.connect("draw", self._draw_swatch, 0.5, 0.5, 0.5)
-        else:
-            swatch.connect("draw", self._draw_swatch, 0.5, 0.5, 0.5)
+        try:
+            r = int(color_hex[0:2], 16) / 255.0 if color_hex else 0.5
+            g = int(color_hex[2:4], 16) / 255.0 if color_hex else 0.5
+            b = int(color_hex[4:6], 16) / 255.0 if color_hex else 0.5
+        except (ValueError, IndexError):
+            r = g = b = 0.5
+        swatch.connect("draw", self._draw_swatch, r, g, b)
         box.pack_start(swatch, False, False, 0)
 
         # Text: name + material · vendor
@@ -188,25 +174,15 @@ class Panel(ScreenPanel):
 
         sub_parts = [p for p in [material, vendor] if p]
         if sub_parts:
-            sub_lbl = Gtk.Label(
-                label=" · ".join(sub_parts)
-            )
+            sub_lbl = Gtk.Label(label=" · ".join(sub_parts))
             sub_lbl.set_halign(Gtk.Align.START)
-            ctx = sub_lbl.get_style_context()
-            ctx.add_class("dim-label")
+            sub_lbl.get_style_context().add_class("dim-label")
             text_box.pack_start(sub_lbl, False, False, 0)
 
         box.pack_start(text_box, True, True, 0)
         row.add(box)
 
-        # Store spool data on the row so the activate handler can retrieve it
-        row._spool_data = {
-            "name": name,
-            "material": material,
-            "vendor": vendor,
-            "color": color_hex,
-            "spool_id": spool_id,
-        }
+        row._spool_id = spool_id
         row.connect("activate", self._on_row_activate)
         return row
 
@@ -238,60 +214,18 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
 
     def _on_row_activate(self, row):
-        self._assign(row._spool_data)
+        self._assign(row._spool_id)
 
     def _on_clear(self, widget):
-        empty = {"name": "", "material": "", "vendor": "", "color": ""}
-        self._assign(empty)
+        self._assign(0)  # 0 = no spool assigned
 
-    def _assign(self, spool_data):
-        new_tools = dict(self.lane_data)
-        new_tools[str(self.lane)] = {
-            "name":     spool_data.get("name", ""),
-            "material": spool_data.get("material", ""),
-            "vendor":   spool_data.get("vendor", ""),
-            "color":    spool_data.get("color", ""),
-        }
-        # Keep spool_id if present (informational only)
-        if "spool_id" in spool_data and spool_data["spool_id"] is not None:
-            new_tools[str(self.lane)]["spool_id"] = spool_data["spool_id"]
-
-        self._save_and_close(new_tools)
-
-    def _save_and_close(self, tools):
-        # Write updated tools dict back to Moonraker's lane_data namespace.
-        #
-        # KlipperScreen's apiclient wraps moonraker-api; the exact signature for
-        # a database write may vary by version.  We try send_request with
-        # method="POST" first.  If your version of KlipperScreen doesn't support
-        # that, replace this call with:
-        #
-        #   self._screen._send_action(None, "server.database.post_item", {
-        #       "namespace": "lane_data", "key": "tools", "value": tools
-        #   })
-        #
-        # Note: _send_action is fire-and-forget (no callback), which is fine here
-        # because spoolman-lane-sync will re-sync Spoolman on its own schedule.
-        try:
-            self._screen.apiclient.send_request(
-                "server/database/item",
-                method="POST",
-                params={"namespace": "lane_data", "key": "tools", "value": tools},
-                callback=self._on_saved,
-            )
-        except TypeError:
-            # Fallback: older apiclient may not accept `method` kwarg
-            self._screen._send_action(None, "server.database.post_item", {
-                "namespace": "lane_data",
-                "key": "tools",
-                "value": tools,
-            })
-            self._close()
-
-    def _on_saved(self, result, **kwargs):
-        GLib.idle_add(self._close)
-
-    def _close(self):
-        # Return to the filament lanes panel, which calls activate() and
-        # re-fetches lane_data automatically.
+    def _assign(self, spool_id):
+        # Write to Klipper save_variables so the assignment persists across
+        # restarts and is the same source the main panel reads from.
+        # Also mirrors what Klipper macros do when scanning a spool tag.
+        script = (
+            f"SET_GCODE_VARIABLE MACRO=T{self.lane} VARIABLE=spool_id VALUE={spool_id}\n"
+            f"SAVE_VARIABLE VARIABLE=t{self.lane}__spool_id VALUE={spool_id}"
+        )
+        self._screen._send_action(None, "printer.gcode.script", {"script": script})
         self._screen.remove_current_panel()
