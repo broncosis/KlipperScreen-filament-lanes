@@ -34,13 +34,15 @@ directly from Klipper's saved variables and Spoolman.
 ## Installation
 
 ```bash
-git clone https://github.com/Broncosis/KlipperScreen-filament-lanes.git
-cd KlipperScreen-filament-lanes
-bash install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/Broncosis/KlipperScreen-filament-lanes/main/install.sh)
 ```
 
-Then add the contents of `example_klipperscreen.conf` to your
-`~/printer_data/config/KlipperScreen.conf` and restart KlipperScreen:
+The script clones the repo to `~/KlipperScreen-filament-lanes` and symlinks
+the panels into `~/.KlipperScreen/panels/`. Symlinks mean a `git pull` in
+the install directory is all that's needed to update.
+
+At the end it prints the config snippet to add to
+`~/printer_data/config/KlipperScreen.conf`, then:
 
 ```bash
 sudo systemctl restart KlipperScreen
