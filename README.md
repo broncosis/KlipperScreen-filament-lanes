@@ -6,7 +6,8 @@ for multi-tool filament management on toolchanger 3D printers.
 Designed for StealthChanger / toolchanger setups using the
 [Filament_feeder](https://github.com/broncosis/Filament_feeder) macros and
 [spoolman-lane-sync](https://github.com/broncosis/spoolman-lane-sync) for live
-spool data.
+spool data. Works without spoolman-lane-sync too — spool assignments are read
+directly from Klipper's saved variables and Spoolman.
 
 ## Features
 
@@ -18,15 +19,17 @@ spool data.
 - Unload button per lane (disabled during active print)
 - Optional Load button (hidden by default — see configuration)
 - Assign spool sub-panel: browse Spoolman spools and assign to any lane
+- Works without spoolman-lane-sync: falls back to reading `t{N}__spool_id`
+  from Klipper save_variables and fetching spool data directly from Spoolman
 
 ## Requirements
 
 - KlipperScreen (GTK3-based)
 - Moonraker with Spoolman integration
-- [spoolman-lane-sync](https://github.com/broncosis/spoolman-lane-sync) writing
-  to the `lane_data` Moonraker database namespace
 - [Filament_feeder](https://github.com/broncosis/Filament_feeder) macros
   (`UNLOAD_ANY_TOOL`, `LOAD_ANY_TOOL_DIST`)
+- [spoolman-lane-sync](https://github.com/broncosis/spoolman-lane-sync)
+  *(optional — panel works without it)*
 
 ## Installation
 
@@ -56,6 +59,31 @@ panel: filament_lanes
 # Uncomment to show a Load button on each lane:
 #show_load_buttons: true
 ```
+
+## Credits
+
+This project builds on the work of several open-source projects:
+
+### KlipperScreen
+- **Source**: https://github.com/KlipperScreen/KlipperScreen
+- **License**: GPL v3
+- The spool icon SVG color-substitution pattern in `panels/filament_lanes.py`
+  is adapted from `panels/spoolman.py` in KlipperScreen. The `ScreenPanel`
+  base class and GTK helper infrastructure (`_gtk`, `_screen`, `_printer`)
+  are part of KlipperScreen.
+
+### Klipper / Moonraker
+- **Source**: https://github.com/Klipper3d/klipper / https://github.com/Arksine/moonraker
+- **License**: GPL v3
+- The `save_variables` mechanism (`t{N}__spool_id`) and Moonraker's database
+  and Spoolman proxy APIs are used for spool assignment persistence and data
+  fetching.
+
+### Spoolman
+- **Source**: https://github.com/Donkie/Spoolman
+- **License**: MIT
+- Spool color, name, and material data is fetched from Spoolman via Moonraker's
+  proxy API.
 
 ## License
 

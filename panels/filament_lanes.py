@@ -43,6 +43,7 @@ class Panel(ScreenPanel):
         self.sensor_states = {}      # int(n) -> bool
         self._is_printing = False
         self._lane_data_timer = None
+        self._pending_spool_ids = {} # n -> spool_id, used during Spoolman fallback
 
         # Per-column widget references
         self._col_wraps = {}         # n -> outer Gtk.Box (wrap + indicator)
@@ -134,6 +135,14 @@ class Panel(ScreenPanel):
             return
 
         new_count = len(value)
+
+        if new_count == 0:
+            # lane_data is empty — spoolman-lane-sync may not be running.
+            # Fall back to reading spool assignments from Klipper save_variables
+            # and fetching spool details directly from Spoolman.
+            self._fetch_from_spoolman_direct()
+            return
+
         self.lane_data = value
 
         if new_count != self.tool_count:
@@ -169,6 +178,88 @@ class Panel(ScreenPanel):
     def _refresh_lane_data(self):
         self._fetch_lane_data()
         return True  # keep GLib timer alive
+
+    def _fetch_from_spoolman_direct(self):
+        """
+        Fallback when lane_data is empty (spoolman-lane-sync not running).
+        Reads t{N}__spool_id from Klipper save_variables, then fetches spool
+        details from Spoolman — the same source spoolman-lane-sync uses.
+        """
+        tool_count = self._detect_tool_count()
+        if tool_count == 0:
+            logger.warning("filament_lanes: could not determine tool count for fallback")
+            return
+
+        if tool_count != self.tool_count:
+            self.tool_count = tool_count
+            self._register_subscriptions()
+
+        save_vars = self._printer.get_stat("save_variables") if self._printer else {}
+        variables = (save_vars or {}).get("variables", {})
+
+        spool_ids = {}
+        for n in range(tool_count):
+            sid = variables.get(f"t{n}__spool_id")
+            if sid is not None:
+                try:
+                    spool_ids[n] = int(sid)
+                except (ValueError, TypeError):
+                    pass
+
+        # Initialise lane_data with empty slots so the UI can build
+        self.lane_data = {
+            str(n): {"name": "", "material": "", "vendor": "", "color": ""}
+            for n in range(tool_count)
+        }
+
+        if not spool_ids:
+            GLib.idle_add(self._build_ui)
+            return
+
+        self._pending_spool_ids = spool_ids
+        self._screen.apiclient.send_request(
+            "server/spoolman/spools",
+            params={},
+            callback=self._on_spoolman_direct_received
+        )
+        GLib.idle_add(self._build_ui)
+
+    def _on_spoolman_direct_received(self, result, **kwargs):
+        if isinstance(result, dict) and "result" in result:
+            spools = result["result"]
+        elif isinstance(result, list):
+            spools = result
+        else:
+            spools = []
+
+        spool_by_id = {s["id"]: s for s in spools if "id" in s}
+
+        for n, sid in self._pending_spool_ids.items():
+            if sid not in spool_by_id:
+                continue
+            filament = spool_by_id[sid].get("filament") or {}
+            vendor = (filament.get("vendor") or {}).get("name", "")
+            self.lane_data[str(n)] = {
+                "name":     filament.get("name", ""),
+                "material": filament.get("material", ""),
+                "vendor":   vendor,
+                "color":    filament.get("color_hex", ""),
+                "spool_id": sid,
+            }
+
+        self._pending_spool_ids = {}
+        GLib.idle_add(self._update_all_lanes)
+
+    def _detect_tool_count(self):
+        """Count tools by probing extruder objects (extruder, extruder1, …)."""
+        if not self._printer:
+            return 0
+        if not self._printer.get_stat("extruder"):
+            return 0
+        count = 1
+        while self._printer.get_stat(f"extruder{count}"):
+            count += 1
+        return count
 
     # ------------------------------------------------------------------ #
     # UI construction                                                      #
