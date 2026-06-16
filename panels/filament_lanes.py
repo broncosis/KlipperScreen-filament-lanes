@@ -51,7 +51,9 @@ class Panel(ScreenPanel):
         self._col_boxes = {}         # n -> inner Gtk.Box (can be dimmed)
         self._active_indicators = {} # n -> Gtk.Box (red bar)
         self._spool_images = {}      # n -> Gtk.Image inside the spool button
-        self._info_labels = {}       # n -> Gtk.Label
+        self._info_labels = {}       # n -> Gtk.Label (name)
+        self._detail_labels = {}     # n -> Gtk.Label (material · weight)
+        self._id_labels = {}         # n -> Gtk.Label (#spool_id)
         self._unload_btns = {}       # n -> Gtk.Button
         self._load_btns = {}         # n -> Gtk.Button (only when show_load_buttons)
 
@@ -177,11 +179,12 @@ class Panel(ScreenPanel):
             filament = spool_by_id[sid].get("filament") or {}
             vendor = (filament.get("vendor") or {}).get("name", "")
             self.lane_data[str(n)] = {
-                "name":     filament.get("name", ""),
-                "material": filament.get("material", ""),
-                "vendor":   vendor,
-                "color":    filament.get("color_hex", ""),
-                "spool_id": sid,
+                "name":             filament.get("name", ""),
+                "material":         filament.get("material", ""),
+                "vendor":           vendor,
+                "color":            filament.get("color_hex", ""),
+                "spool_id":         sid,
+                "remaining_weight": spool_by_id[sid].get("remaining_weight"),
             }
 
         self._pending_spool_ids = {}
@@ -234,6 +237,8 @@ class Panel(ScreenPanel):
         self._active_indicators.clear()
         self._spool_images.clear()
         self._info_labels.clear()
+        self._detail_labels.clear()
+        self._id_labels.clear()
         self._unload_btns.clear()
         self._load_btns.clear()
 
@@ -260,13 +265,17 @@ class Panel(ScreenPanel):
             self.content.show_all()
             return
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        outer.set_homogeneous(True)  # equal-width columns
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
+        cols = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        cols.set_homogeneous(True)  # equal-width columns
         for n in range(self.tool_count):
-            outer.pack_start(self._build_column(n), True, True, 0)
+            cols.pack_start(self._build_column(n), True, True, 0)
+        main.pack_start(cols, True, True, 0)
 
-        self.content.pack_start(outer, True, True, 0)
+        main.pack_start(self._build_action_bar(), False, False, 0)
+
+        self.content.pack_start(main, True, True, 0)
         self.content.show_all()
 
         self._update_all_lanes()
@@ -303,14 +312,27 @@ class Panel(ScreenPanel):
         tool_lbl.set_markup(f"<b>T{n}</b>")
         box.pack_start(tool_lbl, False, False, 0)
 
-        # Spool info (name · material)
+        # Filament name
         info_lbl = Gtk.Label(label="")
-        info_lbl.set_line_wrap(True)
-        info_lbl.set_justify(Gtk.Justification.CENTER)
         info_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        info_lbl.set_max_width_chars(14)
+        info_lbl.set_max_width_chars(12)
+        info_lbl.set_halign(Gtk.Align.CENTER)
         box.pack_start(info_lbl, False, False, 0)
         self._info_labels[n] = info_lbl
+
+        # Material · weight (e.g. "ABS · 1053 g")
+        detail_lbl = Gtk.Label(label="")
+        detail_lbl.set_halign(Gtk.Align.CENTER)
+        detail_lbl.get_style_context().add_class("dim-label")
+        box.pack_start(detail_lbl, False, False, 0)
+        self._detail_labels[n] = detail_lbl
+
+        # Spool ID (e.g. "#39")
+        id_lbl = Gtk.Label(label="")
+        id_lbl.set_halign(Gtk.Align.CENTER)
+        id_lbl.get_style_context().add_class("dim-label")
+        box.pack_start(id_lbl, False, False, 0)
+        self._id_labels[n] = id_lbl
 
         # Assign spool button
         assign_btn = self._gtk.Button("filament", _("Assign"), "color1")
@@ -349,18 +371,27 @@ class Panel(ScreenPanel):
         color = data.get("color", "")
         name = data.get("name", "")
         material = data.get("material", "")
+        spool_id = data.get("spool_id")
+        remaining = data.get("remaining_weight")
 
         has_spool = bool(color or name or material)
         filament_detected = self.sensor_states.get(n, False)
 
         self._render_spool(n, color if has_spool else None)
 
-        info = self._info_labels[n]
         if has_spool:
-            parts = [p for p in [name, material] if p]
-            info.set_text(" · ".join(parts) if parts else "—")
+            self._info_labels[n].set_text(name or "—")
+
+            detail_parts = [p for p in [material] if p]
+            if remaining is not None:
+                detail_parts.append(f"{remaining:.0f} g")
+            self._detail_labels[n].set_text(" · ".join(detail_parts))
+
+            self._id_labels[n].set_text(f"#{spool_id}" if spool_id else "")
         else:
-            info.set_text(_("Empty"))
+            self._info_labels[n].set_text(_("Empty"))
+            self._detail_labels[n].set_text("")
+            self._id_labels[n].set_text("")
 
         dim = not has_spool and not filament_detected
         self._col_boxes[n].set_opacity(0.35 if dim else 1.0)
@@ -456,6 +487,37 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
     # Button handlers                                                      #
     # ------------------------------------------------------------------ #
+
+    def _build_action_bar(self):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.pack_start(
+            Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
+            False, False, 0
+        )
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        bar.set_margin_start(6)
+        bar.set_margin_end(6)
+        bar.set_margin_top(6)
+        bar.set_margin_bottom(6)
+
+        clean_btn = self._gtk.Button("clean", _("Clean Nozzle"), "color1")
+        clean_btn.connect("clicked", self._on_clean_nozzle)
+        bar.pack_start(clean_btn, True, True, 0)
+
+        unselect_btn = self._gtk.Button("toolchanger", _("Unselect Tool"), "color2")
+        unselect_btn.connect("clicked", self._on_unselect_tool)
+        bar.pack_start(unselect_btn, True, True, 0)
+
+        outer.pack_start(bar, False, False, 0)
+        return outer
+
+    def _on_clean_nozzle(self, widget):
+        self._screen._send_action(widget, "printer.gcode.script",
+                                  {"script": "CLEAN_NOZZLE"})
+
+    def _on_unselect_tool(self, widget):
+        self._screen._send_action(widget, "printer.gcode.script",
+                                  {"script": "UNSELECT_TOOL"})
 
     def _on_spool_clicked(self, widget, n):
         self._screen._send_action(widget, "printer.gcode.script",
