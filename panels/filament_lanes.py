@@ -62,6 +62,8 @@ class Panel(ScreenPanel):
         raw = cfg.get("show_load_buttons", "false") if cfg else "false"
         self.show_load_buttons = raw.strip().lower() in ("true", "1", "yes")
 
+        self._action_buttons = self._parse_action_buttons(cfg)
+
         global _CSS_INJECTED
         if not _CSS_INJECTED:
             provider = Gtk.CssProvider()
@@ -488,6 +490,44 @@ class Panel(ScreenPanel):
     # Button handlers                                                      #
     # ------------------------------------------------------------------ #
 
+    def _parse_action_buttons(self, cfg):
+        """
+        Reads action_button_1, action_button_2, … from KlipperScreen.conf.
+        Each value is colon-separated:  MACRO:Label:icon:style
+        icon and style are optional.  Falls back to built-in defaults if
+        no action_button_N keys are present.
+
+        Example KlipperScreen.conf entries:
+            action_button_1: CLEAN_NOZZLE:Clean Nozzle:clean:color1
+            action_button_2: UNSELECT_TOOL:Unselect Tool:toolchanger:color2
+            action_button_3: MY_MACRO:My Button
+        """
+        _DEFAULTS = [
+            ("CLEAN_NOZZLE",   _("Clean Nozzle"),   "clean",       "color1"),
+            ("UNSELECT_TOOL",  _("Unselect Tool"),  "toolchanger", "color2"),
+        ]
+        if not cfg:
+            return _DEFAULTS
+
+        buttons = []
+        i = 1
+        while True:
+            val = cfg.get(f"action_button_{i}", "").strip()
+            if not val:
+                break
+            parts = [p.strip() for p in val.split(":")]
+            if len(parts) >= 2:
+                macro = parts[0]
+                label = parts[1]
+                icon  = parts[2] if len(parts) > 2 else ""
+                style = parts[3] if len(parts) > 3 else "color1"
+                buttons.append((macro, label, icon, style))
+            else:
+                logger.warning("filament_lanes: ignoring malformed action_button_%d: %r", i, val)
+            i += 1
+
+        return buttons if buttons else _DEFAULTS
+
     def _build_action_bar(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.pack_start(
@@ -500,24 +540,17 @@ class Panel(ScreenPanel):
         bar.set_margin_top(6)
         bar.set_margin_bottom(6)
 
-        clean_btn = self._gtk.Button("clean", _("Clean Nozzle"), "color1")
-        clean_btn.connect("clicked", self._on_clean_nozzle)
-        bar.pack_start(clean_btn, True, True, 0)
-
-        unselect_btn = self._gtk.Button("toolchanger", _("Unselect Tool"), "color2")
-        unselect_btn.connect("clicked", self._on_unselect_tool)
-        bar.pack_start(unselect_btn, True, True, 0)
+        for macro, label, icon, style in self._action_buttons:
+            btn = self._gtk.Button(icon, _(label), style)
+            btn.connect("clicked", self._on_action_btn_clicked, macro)
+            bar.pack_start(btn, True, True, 0)
 
         outer.pack_start(bar, False, False, 0)
         return outer
 
-    def _on_clean_nozzle(self, widget):
+    def _on_action_btn_clicked(self, widget, macro):
         self._screen._send_action(widget, "printer.gcode.script",
-                                  {"script": "CLEAN_NOZZLE"})
-
-    def _on_unselect_tool(self, widget):
-        self._screen._send_action(widget, "printer.gcode.script",
-                                  {"script": "UNSELECT_TOOL"})
+                                  {"script": macro})
 
     def _on_spool_clicked(self, widget, n):
         self._screen._send_action(widget, "printer.gcode.script",
