@@ -12,7 +12,31 @@ set -e
 
 REPO_URL="https://github.com/Broncosis/KlipperScreen-filament-lanes.git"
 INSTALL_DIR="${HOME}/KlipperScreen-filament-lanes"
-KS_PANELS="${HOME}/.KlipperScreen/panels"
+
+# ── Locate KlipperScreen installation ────────────────────────────────────────
+
+find_ks_panels() {
+    for candidate in \
+        "${HOME}/KlipperScreen/panels" \
+        "/home/pi/KlipperScreen/panels" \
+        "/opt/KlipperScreen/panels"
+    do
+        if [ -f "${candidate}/main_menu.py" ]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+KS_PANELS=$(find_ks_panels) || {
+    echo "ERROR: Could not find a KlipperScreen installation."
+    echo "       Looked for ~/KlipperScreen/panels, /home/pi/KlipperScreen/panels, /opt/KlipperScreen/panels"
+    echo "       Make sure KlipperScreen is installed before running this installer."
+    exit 1
+}
+
+echo "Found KlipperScreen panels at: ${KS_PANELS}"
 
 # ── Clone or update the repo ──────────────────────────────────────────────────
 
@@ -24,9 +48,7 @@ else
     git clone "${REPO_URL}" "${INSTALL_DIR}"
 fi
 
-# ── Symlink panels ────────────────────────────────────────────────────────────
-
-mkdir -p "${KS_PANELS}"
+# ── Symlink panels into KlipperScreen's panels directory ──────────────────────
 
 for f in filament_lanes.py filament_lanes_spoolman.py; do
     src="${INSTALL_DIR}/panels/${f}"
