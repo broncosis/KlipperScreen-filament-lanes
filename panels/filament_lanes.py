@@ -44,7 +44,7 @@ class Panel(ScreenPanel):
         self.active_tool = None
         self.sensor_states = {}      # int(n) -> bool
         self._is_printing = False
-        self._pending_spool_ids = {} # n -> spool_id, in-flight during Spoolman fetch
+        self._refresh_timer = None
 
         # Per-column widget references
         self._col_wraps = {}         # n -> outer Gtk.Box (wrap + indicator)
@@ -77,7 +77,10 @@ class Panel(ScreenPanel):
         self._spool_svg_template = self._load_spool_svg()
 
         self._build_placeholder()
-        self._fetch_data()
+        # Defer first fetch so the panel renders before blocking on HTTP calls
+        GLib.idle_add(self._fetch_data)
+        # Refresh every 10 seconds to pick up spool assignment changes
+        self._refresh_timer = GLib.timeout_add_seconds(10, self._on_refresh_timer)
 
     # ------------------------------------------------------------------ #
     # SVG template loader                                                  #
@@ -118,22 +121,45 @@ class Panel(ScreenPanel):
 
     def _fetch_data(self):
         """
-        Primary data fetch.  Reads t{N}__spool_id from Klipper save_variables,
-        then fetches spool details from Spoolman via Moonraker.  No dependency
-        on spoolman-lane-sync or any external sync service.
+        Reads t{N}__spool_id from Klipper save_variables via REST, then
+        fetches spool details from Spoolman via Moonraker proxy.
+        No dependency on spoolman-lane-sync or any external sync service.
+        Called on panel open, on activate(), and every 10 s by a timer.
         """
         tool_count = self._detect_tool_count()
         if tool_count == 0:
             logger.warning("filament_lanes: could not determine tool count")
-            return
+            return False
 
-        if tool_count != self.tool_count:
-            self.tool_count = tool_count
-            self._register_subscriptions()
+        changed_tool_count = (tool_count != self.tool_count)
+        self.tool_count = tool_count
 
-        save_vars = self._printer.get_stat("save_variables") if self._printer else {}
-        variables = (save_vars or {}).get("variables", {})
+        # Fetch save_variables + toolchanger state via synchronous REST.
+        # KlipperScreen uses the same pattern for its own periodic fetches.
+        result = self._screen.apiclient.send_request(
+            "printer/objects/query?save_variables&toolchanger"
+        )
+        variables = {}
+        if result and isinstance(result, dict) and "status" in result:
+            sv = result["status"].get("save_variables", {})
+            variables = sv.get("variables", {})
+            tc = result["status"].get("toolchanger", {})
+            if "tool_number" in tc:
+                self.active_tool = tc["tool_number"]
 
+        # Print state is in the default subscription, so read from cached data.
+        if self._printer:
+            ps = self._printer.get_stat("print_stats")
+            if ps:
+                self._is_printing = ps.get("state") == "printing"
+            # Seed filament sensor states from cached printer data.
+            for n in range(tool_count):
+                key = f"filament_switch_sensor filament_sensor_at_tool{n}"
+                sensor = self._printer.get_stat(key)
+                if sensor:
+                    self.sensor_states[n] = sensor.get("filament_detected", False)
+
+        # Map spool IDs from save_variables keys t0__spool_id, t1__spool_id, …
         spool_ids = {}
         for n in range(tool_count):
             sid = variables.get(f"t{n}__spool_id")
@@ -145,52 +171,39 @@ class Panel(ScreenPanel):
                 except (ValueError, TypeError):
                     pass
 
-        # Reset lane data to empty slots; Spoolman callback fills them in.
+        # Reset lane data; Spoolman details fill in below.
         self.lane_data = {
             str(n): {"name": "", "material": "", "vendor": "", "color": ""}
             for n in range(tool_count)
         }
 
-        if not spool_ids:
-            GLib.idle_add(self._build_ui)
-            return
+        if spool_ids:
+            spools = self._screen.spoolman_api.load_all_spools()
+            if spools and isinstance(spools, list):
+                spool_by_id = {s["id"]: s for s in spools if "id" in s}
+                for n, sid in spool_ids.items():
+                    if sid not in spool_by_id:
+                        continue
+                    filament = spool_by_id[sid].get("filament") or {}
+                    vendor = (filament.get("vendor") or {}).get("name", "")
+                    self.lane_data[str(n)] = {
+                        "name":             filament.get("name", ""),
+                        "material":         filament.get("material", ""),
+                        "vendor":           vendor,
+                        "color":            filament.get("color_hex", ""),
+                        "spool_id":         sid,
+                        "remaining_weight": spool_by_id[sid].get("remaining_weight"),
+                    }
 
-        self._pending_spool_ids = spool_ids
-        self._screen.apiclient.send_request(
-            "server/spoolman/spools",
-            params={},
-            callback=self._on_spoolman_received
-        )
-        # Build the UI immediately with empty slots; spool data fills in when
-        # the Spoolman response arrives.
-        GLib.idle_add(self._build_ui)
-
-    def _on_spoolman_received(self, result, **kwargs):
-        if isinstance(result, dict) and "result" in result:
-            spools = result["result"]
-        elif isinstance(result, list):
-            spools = result
+        if changed_tool_count:
+            self._build_ui()
         else:
-            spools = []
+            self._update_all_lanes()
+        return False  # stop GLib.idle_add from repeating
 
-        spool_by_id = {s["id"]: s for s in spools if "id" in s}
-
-        for n, sid in self._pending_spool_ids.items():
-            if sid not in spool_by_id:
-                continue
-            filament = spool_by_id[sid].get("filament") or {}
-            vendor = (filament.get("vendor") or {}).get("name", "")
-            self.lane_data[str(n)] = {
-                "name":             filament.get("name", ""),
-                "material":         filament.get("material", ""),
-                "vendor":           vendor,
-                "color":            filament.get("color_hex", ""),
-                "spool_id":         sid,
-                "remaining_weight": spool_by_id[sid].get("remaining_weight"),
-            }
-
-        self._pending_spool_ids = {}
-        GLib.idle_add(self._update_all_lanes)
+    def _on_refresh_timer(self):
+        self._fetch_data()
+        return True  # keep timer running
 
     def _detect_tool_count(self):
         """Count tools by probing extruder objects (extruder, extruder1, …)."""
@@ -202,30 +215,6 @@ class Panel(ScreenPanel):
         while self._printer.get_stat(f"extruder{count}"):
             count += 1
         return count
-
-    def _register_subscriptions(self):
-        self.add_subscription("toolchanger")
-        self.add_subscription("print_stats")
-        self.add_subscription("save_variables")
-        for n in range(self.tool_count):
-            self.add_subscription(
-                f"filament_switch_sensor filament_sensor_at_tool{n}"
-            )
-
-        # Seed live state from whatever the printer object already has cached.
-        if not self._printer:
-            return
-        tc = self._printer.get_stat("toolchanger")
-        if tc:
-            self.active_tool = tc.get("tool_number")
-        ps = self._printer.get_stat("print_stats")
-        if ps:
-            self._is_printing = ps.get("state") == "printing"
-        for n in range(self.tool_count):
-            key = f"filament_switch_sensor filament_sensor_at_tool{n}"
-            sensor = self._printer.get_stat(key)
-            if sensor:
-                self.sensor_states[n] = sensor.get("filament_detected", False)
 
     # ------------------------------------------------------------------ #
     # UI construction                                                      #
@@ -445,29 +434,19 @@ class Panel(ScreenPanel):
             btn.set_sensitive(sensitive)
 
     # ------------------------------------------------------------------ #
-    # KlipperScreen subscription callbacks                                 #
+    # KlipperScreen update callback                                        #
     # ------------------------------------------------------------------ #
 
     def process_update(self, action, data):
         if action != "notify_status_update":
             return
 
-        if "toolchanger" in data:
-            active = data["toolchanger"].get("tool_number")
-            if active is not None:
-                self.active_tool = active
-                self._update_active_indicator()
-
+        # print_stats and filament sensors are in the default KS subscription.
         if "print_stats" in data:
             state = data["print_stats"].get("state")
             if state is not None:
                 self._is_printing = state == "printing"
                 self._update_print_buttons()
-
-        # Re-fetch Spoolman data when spool assignments change in save_variables.
-        if "save_variables" in data:
-            self._fetch_data()
-            return
 
         for n in range(self.tool_count):
             key = f"filament_switch_sensor filament_sensor_at_tool{n}"
@@ -482,8 +461,7 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
 
     def activate(self):
-        # Refresh every time the panel comes to the foreground, including
-        # returning from the assign sub-panel after a spool change.
+        # Refresh when returning to the panel, e.g. after assigning a spool.
         self._fetch_data()
 
     # ------------------------------------------------------------------ #
