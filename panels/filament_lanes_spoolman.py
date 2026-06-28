@@ -77,6 +77,7 @@ class Panel(ScreenPanel):
         self._listbox = Gtk.ListBox()
         self._listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self._listbox.set_activate_on_single_click(True)
+        self._listbox.connect("row-activated", self._on_row_activated)
         scroll.add(self._listbox)
         root.pack_start(scroll, True, True, 0)
 
@@ -177,7 +178,6 @@ class Panel(ScreenPanel):
         row.add(box)
 
         row._spool_id = spool_id
-        row.connect("activate", self._on_row_activate)
         return row
 
     @staticmethod
@@ -207,7 +207,7 @@ class Panel(ScreenPanel):
     # Actions                                                              #
     # ------------------------------------------------------------------ #
 
-    def _on_row_activate(self, row):
+    def _on_row_activated(self, listbox, row):
         self._assign(row._spool_id)
 
     def _on_clear(self, widget):
