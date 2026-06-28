@@ -29,7 +29,7 @@ class Panel(ScreenPanel):
         self.spools = []
 
         self._build_ui()
-        self._fetch_spools()
+        GLib.idle_add(self._fetch_spools)
 
     # ------------------------------------------------------------------ #
     # UI construction                                                      #
@@ -86,32 +86,11 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
 
     def _fetch_spools(self):
-        self._screen.apiclient.send_request(
-            "server/spoolman/spools",
-            params={},
-            callback=self._on_spools_received
-        )
-
-    def _on_spools_received(self, result, **kwargs):
-        if not result:
+        spools = self._screen.spoolman_api.load_all_spools()
+        if not spools or not isinstance(spools, list):
             logger.warning("filament_lanes_spoolman: spool fetch returned nothing")
             GLib.idle_add(self._show_error, _("Could not fetch spool list."))
             return
-
-        if isinstance(result, dict) and "result" in result:
-            spools = result["result"]
-        elif isinstance(result, list):
-            spools = result
-        else:
-            spools = []
-
-        if not isinstance(spools, list):
-            logger.warning(
-                "filament_lanes_spoolman: unexpected spools shape: %r", result
-            )
-            GLib.idle_add(self._show_error, _("Unexpected spool data format."))
-            return
-
         self.spools = spools
         GLib.idle_add(self._populate_list)
 
@@ -228,4 +207,4 @@ class Panel(ScreenPanel):
             f"SAVE_VARIABLE VARIABLE=t{self.lane}__spool_id VALUE={spool_id}"
         )
         self._screen._send_action(None, "printer.gcode.script", {"script": script})
-        self._screen.remove_current_panel()
+        self._screen._menu_go_back()
