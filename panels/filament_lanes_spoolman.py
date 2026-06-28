@@ -36,26 +36,41 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
 
     def _build_ui(self):
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        # Two-column layout: left = lane info + clear button, right = spool list
+        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
 
-        # Header: current assignment + clear button
+        # ── Left panel ────────────────────────────────────────────────────
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        left.set_margin_start(8)
+        left.set_margin_end(8)
+        left.set_margin_top(8)
+        left.set_size_request(160, -1)
+
         cur_name = self.current_name or _("None")
-        header = Gtk.Label()
-        header.set_markup(
-            f"<b>T{self.lane}</b>  —  {GLib.markup_escape_text(cur_name)}"
-        )
-        header.set_halign(Gtk.Align.START)
-        header.set_margin_start(8)
-        root.pack_start(header, False, False, 4)
+        lane_lbl = Gtk.Label()
+        lane_lbl.set_markup(f"<b>T{self.lane}</b>")
+        lane_lbl.set_halign(Gtk.Align.START)
+        left.pack_start(lane_lbl, False, False, 0)
 
-        clear_btn = self._gtk.Button("cancel", _("Clear Assignment"), "color2")
+        cur_lbl = Gtk.Label(label=cur_name)
+        cur_lbl.set_halign(Gtk.Align.START)
+        cur_lbl.set_line_wrap(True)
+        cur_lbl.get_style_context().add_class("dim-label")
+        left.pack_start(cur_lbl, False, False, 0)
+
+        clear_btn = self._gtk.Button("cancel", _("Clear"), "color2")
         clear_btn.connect("clicked", self._on_clear)
-        root.pack_start(clear_btn, False, False, 0)
+        left.pack_start(clear_btn, False, False, 0)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        root.pack_start(sep, False, False, 4)
+        root.pack_start(left, False, False, 0)
 
-        # Scrollable spool list
+        # Vertical separator between columns
+        root.pack_start(
+            Gtk.Separator(orientation=Gtk.Orientation.VERTICAL),
+            False, False, 0
+        )
+
+        # ── Right panel: scrollable spool list ────────────────────────────
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
