@@ -334,16 +334,22 @@ class Panel(ScreenPanel):
         box.pack_start(id_lbl, False, False, 0)
         self._id_labels[n] = id_lbl
 
-        # Assign spool button
+        # Assign and Unload buttons — compact row (icon + short label, fixed height)
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         assign_btn = self._gtk.Button("filament", _("Assign"), "color1")
+        assign_btn.set_vexpand(False)
+        assign_btn.set_size_request(-1, 40)
         assign_btn.connect("clicked", self._on_assign_clicked, n)
-        box.pack_start(assign_btn, False, False, 0)
+        btn_row.pack_start(assign_btn, True, True, 0)
 
-        # Unload button
         unload_btn = self._gtk.Button("arrow-down", _("Unload"), "color2")
+        unload_btn.set_vexpand(False)
+        unload_btn.set_size_request(-1, 40)
         unload_btn.connect("clicked", self._on_unload_clicked, n)
-        box.pack_start(unload_btn, False, False, 0)
+        btn_row.pack_start(unload_btn, True, True, 0)
         self._unload_btns[n] = unload_btn
+
+        box.pack_start(btn_row, False, False, 0)
 
         # Optional load button (hidden by default)
         if self.show_load_buttons:
@@ -517,6 +523,11 @@ class Panel(ScreenPanel):
 
     def _build_action_bar(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.set_vexpand(False)
+        # Hard minimum height so the row is always visible regardless of
+        # how GTK resolves vexpand propagation from child widgets.
+        outer.set_size_request(-1, 60)
+
         outer.pack_start(
             Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
             False, False, 0
@@ -524,15 +535,20 @@ class Panel(ScreenPanel):
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         bar.set_margin_start(6)
         bar.set_margin_end(6)
-        bar.set_margin_top(6)
-        bar.set_margin_bottom(6)
+        bar.set_margin_top(4)
+        bar.set_margin_bottom(4)
+        bar.set_vexpand(False)
 
         for macro, label, icon, style in self._action_buttons:
-            btn = self._gtk.Button(icon, _(label), style)
+            # Use plain Gtk.Button so vexpand defaults to False — avoids the
+            # _gtk.Button vexpand=True propagation that hides this bar.
+            btn = Gtk.Button(label=_(label))
+            btn.get_style_context().add_class(style)
+            btn.set_vexpand(False)
             btn.connect("clicked", self._on_action_btn_clicked, macro)
             bar.pack_start(btn, True, True, 0)
 
-        outer.pack_start(bar, False, False, 0)
+        outer.pack_start(bar, True, True, 0)
         return outer
 
     def _on_action_btn_clicked(self, widget, macro):
