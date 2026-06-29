@@ -537,6 +537,7 @@ class Panel(ScreenPanel):
     def _on_assign_clicked(self, widget, n):
         self._screen.show_panel(
             "filament_lanes_spoolman",
+            panel_name=f"filament_lanes_spoolman_{n}",
             title=_(f"Assign Spool — T{n}"),
             lane=n,
             current_name=self.lane_data.get(str(n), {}).get("name", ""),
