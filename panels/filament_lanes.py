@@ -63,6 +63,7 @@ class Panel(ScreenPanel):
         self.show_load_buttons = raw.strip().lower() in ("true", "1", "yes")
 
         self._action_buttons = self._parse_action_buttons(cfg)
+        self._extra_bar_btns = []   # buttons added to base_panel action_bar
 
         global _CSS_INJECTED
         if not _CSS_INJECTED:
@@ -261,17 +262,7 @@ class Panel(ScreenPanel):
         for n in range(self.tool_count):
             cols.pack_start(self._build_column(n), True, True, 0)
 
-        action_col = self._build_action_col()
-
-        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        root.pack_start(cols, True, True, 0)
-        root.pack_start(
-            Gtk.Separator(orientation=Gtk.Orientation.VERTICAL),
-            False, False, 0
-        )
-        root.pack_start(action_col, False, False, 0)
-
-        self.content.add(root)
+        self.content.add(cols)
         self.content.show_all()
 
         self._update_all_lanes()
@@ -468,8 +459,20 @@ class Panel(ScreenPanel):
     # ------------------------------------------------------------------ #
 
     def activate(self):
-        # Refresh when returning to the panel, e.g. after assigning a spool.
         self._fetch_data()
+        action_bar = self._screen.base_panel.action_bar
+        for macro, label, icon, style in self._action_buttons:
+            btn = self._gtk.Button(icon, _(label), style)
+            btn.connect("clicked", self._on_action_btn_clicked, macro)
+            action_bar.add(btn)
+            self._extra_bar_btns.append(btn)
+        action_bar.show_all()
+
+    def deactivate(self):
+        action_bar = self._screen.base_panel.action_bar
+        for btn in self._extra_bar_btns:
+            action_bar.remove(btn)
+        self._extra_bar_btns.clear()
 
     # ------------------------------------------------------------------ #
     # Button handlers                                                      #
@@ -512,22 +515,6 @@ class Panel(ScreenPanel):
             i += 1
 
         return buttons if buttons else _DEFAULTS
-
-    def _build_action_col(self):
-        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        col.set_margin_start(6)
-        col.set_margin_end(6)
-        col.set_margin_top(8)
-        col.set_margin_bottom(8)
-        col.set_size_request(120, -1)
-
-        for macro, label, icon, style in self._action_buttons:
-            btn = self._gtk.Button(icon, _(label), style)
-            btn.set_vexpand(False)
-            btn.connect("clicked", self._on_action_btn_clicked, macro)
-            col.pack_start(btn, False, False, 0)
-
-        return col
 
     def _on_action_btn_clicked(self, widget, macro):
         self._screen._send_action(widget, "printer.gcode.script",
