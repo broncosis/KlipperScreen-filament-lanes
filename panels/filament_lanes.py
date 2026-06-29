@@ -258,15 +258,24 @@ class Panel(ScreenPanel):
 
         cols = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         cols.set_homogeneous(True)  # equal-width columns
+        cols.set_vexpand(True)
         for n in range(self.tool_count):
             cols.pack_start(self._build_column(n), True, True, 0)
 
-        # Pack action bar directly into content via pack_end so _gtk.Button's
-        # vexpand=True in the column buttons can't squish it off-screen.
         action_bar = self._build_action_bar()
+        # Explicitly stop button vexpand=True from propagating up through the
+        # action bar and stealing vertical space from the columns row.
         action_bar.set_vexpand(False)
-        self.content.pack_end(action_bar, False, False, 0)
-        self.content.pack_start(cols, True, True, 0)
+
+        # Use a Grid so the action bar row gets its natural height and the
+        # columns row fills everything else. This matches the pattern used by
+        # built-in panels (move.py, etc.) and is immune to vexpand propagation.
+        grid = Gtk.Grid()
+        grid.set_row_spacing(0)
+        grid.attach(cols,       0, 0, 1, 1)
+        grid.attach(action_bar, 0, 1, 1, 1)
+
+        self.content.add(grid)
         self.content.show_all()
 
         self._update_all_lanes()
