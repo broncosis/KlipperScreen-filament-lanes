@@ -256,17 +256,17 @@ class Panel(ScreenPanel):
             self.content.show_all()
             return
 
-        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-
         cols = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         cols.set_homogeneous(True)  # equal-width columns
         for n in range(self.tool_count):
             cols.pack_start(self._build_column(n), True, True, 0)
-        main.pack_start(cols, True, True, 0)
 
-        main.pack_start(self._build_action_bar(), False, False, 0)
-
-        self.content.pack_start(main, True, True, 0)
+        # Pack action bar directly into content via pack_end so _gtk.Button's
+        # vexpand=True in the column buttons can't squish it off-screen.
+        action_bar = self._build_action_bar()
+        action_bar.set_vexpand(False)
+        self.content.pack_end(action_bar, False, False, 0)
+        self.content.pack_start(cols, True, True, 0)
         self.content.show_all()
 
         self._update_all_lanes()
@@ -481,7 +481,7 @@ class Panel(ScreenPanel):
             action_button_3: MY_MACRO:My Button
         """
         _DEFAULTS = [
-            ("CLEAN_NOZZLE",   _("Clean Nozzle"),   "clean",       "color1"),
+            ("CLEAN_NOZZLE",   _("Clean Nozzle"),   "fine-tune",   "color1"),
             ("UNSELECT_TOOL",  _("Unselect Tool"),  "toolchanger", "color2"),
         ]
         if not cfg:
