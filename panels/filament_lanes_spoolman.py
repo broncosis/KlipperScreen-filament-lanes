@@ -168,11 +168,11 @@ class Panel(ScreenPanel):
         text_box.pack_start(name_lbl, False, False, 0)
 
         sub_parts = [p for p in [material, vendor] if p]
-        if sub_parts:
-            sub_lbl = Gtk.Label(label=" · ".join(sub_parts))
-            sub_lbl.set_halign(Gtk.Align.START)
-            sub_lbl.get_style_context().add_class("dim-label")
-            text_box.pack_start(sub_lbl, False, False, 0)
+        sub_parts.append(f"#{spool_id}")
+        sub_lbl = Gtk.Label(label=" · ".join(sub_parts))
+        sub_lbl.set_halign(Gtk.Align.START)
+        sub_lbl.get_style_context().add_class("dim-label")
+        text_box.pack_start(sub_lbl, False, False, 0)
 
         box.pack_start(text_box, True, True, 0)
         row.add(box)
