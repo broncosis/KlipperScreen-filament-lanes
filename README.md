@@ -9,6 +9,12 @@ Designed for StealthChanger / toolchanger setups using the
 spool data. Works without spoolman-lane-sync too — spool assignments are read
 directly from Klipper's saved variables and Spoolman.
 
+## Screenshots
+
+| Main menu | Filament panel |
+|-----------|----------------|
+| ![Main menu showing Filament button](screenshots/Main_screen.png) | ![Filament panel with 5 tool lanes](screenshots/filament_menu.png) |
+
 ## Features
 
 - One vertical column per tool, scales automatically (4, 5, 6+ tools)
@@ -54,7 +60,7 @@ In `KlipperScreen.conf`:
 
 ```ini
 [menu __main filament_lanes]
-name: Filament Lanes
+name: Filament
 icon: filament
 panel: filament_lanes
 
